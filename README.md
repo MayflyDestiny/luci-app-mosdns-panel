@@ -74,7 +74,14 @@ opkg install luci-app-mosdns-panel_*.ipk
 
 *   **API 地址**：默认连接 `http://127.0.0.1:9091`。请确保您的 MosDNS 配置文件中开启了 API 并监听该端口。
 *   **缓存恢复路径**：在执行“恢复缓存”操作时，默认会尝试从 `/etc/mosdns/` 目录加载对应的 `.dump` 文件。如果使用了自定义配置，请确保 `config_custom.yaml` 中的 `dump_file` 路径设置正确。
-*   **自定义配置**：本仓库的 `yaml` 目录下提供了推荐的 MosDNS 自定义配置文件（`config_custom.yaml`, `dat_exec.yaml`, `dns.yaml`）。如果您需要使用这些配置，请手动下载并上传至路由器的 `/etc/mosdns/` 目录。详细说明请参考 `yaml` 目录下的说明文档。
+*   **缓存数据统计说明**：
+    *   **全部缓存/国内/国外缓存**：如果您希望面板能精确区分并显示国内（`cache_cn`）和国外（`cache_google`）的缓存统计数据，需要使用 MosDNS 的 **自定义配置**。
+        1.  进入 MosDNS 设置界面 -> **基本设置** -> **基本选项** -> **配置文件**。
+        2.  勾选 **自定义配置**。
+        3.  您需要手动配置 `cache_cn` 和 `cache_google` 两个缓存插件，并正确配置其分流规则。
+        4.  如果您不熟悉如何配置，可以参考 [MosDNS Wiki](https://irine-sistiana.gitbook.io/mosdns-wiki) 学习，或者直接使用本项目提供的 **预设配置文件**。
+        5.  预设配置文件（包含 `cache_cn`, `cache_google` 配置）可以在 [Releases](https://github.com/MayflyDestiny/luci-app-mosdns-panel/releases) 页面下载，文件名为 `mosdns_custom_config_*.zip`。下载后解压并上传至路由器的 `/etc/mosdns/` 目录即可。
+    *   **乐观缓存 (Lazy Cache)**：如果您使用 MosDNS 的 **内置配置**（非自定义），面板将主要展示“乐观缓存”的数据。由于乐观缓存通常配置在处理流程的最前端，它能捕获并统计绝大部分的 DNS 请求数据。如果您对国内/国外分流统计没有强需求，直接使用内置配置也是完全可行的。
 
 ## 🤝 致谢与参考
 
