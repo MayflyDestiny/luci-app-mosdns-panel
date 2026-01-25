@@ -1,0 +1,10 @@
+{
+	"admin/services/mosdns/panel": {
+		"title": "面板",
+		"order": 99,
+		"action": {
+			"type": "template",
+			"path": "mosdns/panel"
+		}
+	}
+}

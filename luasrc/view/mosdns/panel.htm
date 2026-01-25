@@ -1,0 +1,37 @@
+<%+header%>
+<div class="cbi-map">
+    <h2 name="content" style="display: flex; align-items: center; justify-content: space-between;">
+        <%:MosDNS Panel%>
+        <a class="cbi-button cbi-button-apply" href="/luci-static/resources/mosdns-panel/index.html" target="_blank" style="font-size: small; font-weight: normal; margin: 0;">
+            <%:在新窗口打开面板%>
+        </a>
+    </h2>
+    <div class="cbi-section">
+        <iframe id="mosdns-panel-frame" src="/luci-static/resources/mosdns-panel/index.html?mode=embedded" style="width:100%; min-height:800px; border:none; border-radius: 4px; box-shadow: 0 0 5px rgba(0,0,0,0.1);" scrolling="no"></iframe>
+        <script type="text/javascript">
+            (function() {
+                var frame = document.getElementById('mosdns-panel-frame');
+                if (!frame) return;
+                
+                function resize() {
+                    try {
+                        var doc = frame.contentDocument || frame.contentWindow.document;
+                        if (doc && doc.body) {
+                            var h = Math.max(doc.body.scrollHeight, doc.documentElement.scrollHeight);
+                            if (h > 0 && Math.abs(frame.clientHeight - h) > 5) {
+                                frame.style.height = h + 'px';
+                            }
+                        }
+                    } catch(e) { }
+                }
+
+                frame.onload = function() {
+                    resize();
+                    // Check periodically for dynamic content changes
+                    setInterval(resize, 500);
+                };
+            })();
+        </script>
+    </div>
+</div>
+<%+footer%>
