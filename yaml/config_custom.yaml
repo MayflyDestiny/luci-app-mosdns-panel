@@ -164,7 +164,6 @@ plugins:
   - tag: main_sequence
     type: sequence
     args:
-      - exec: jump has_resp_main
       # 1. GFW 域名优先 → 国外 (最确定需要代理)
       - matches: qname $geosite_gfw
         exec: $query_nocn
