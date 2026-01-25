@@ -138,33 +138,43 @@ function action_restore_dump(plugin_name)
     
     -- Check if default file exists
     if not fs.access(dump_file) then
-        -- Try to find in config_custom.yaml
-        local custom_config = "/etc/mosdns/config_custom.yaml"
+        -- Try to find in any .yaml file in /etc/mosdns/
+        local config_dir = "/etc/mosdns/"
+        local dir_iter = fs.dir(config_dir)
         local found_in_config = false
         
-        if fs.access(custom_config) then
-            local file = io.open(custom_config, "r")
-            if file then
-                local content = file:read("*a")
-                file:close()
-                
-                local in_tag = false
-                for line in content:gmatch("[^\r\n]+") do
-                    -- Check for tag start
-                    if line:match("tag:%s*" .. plugin_name) then
-                        in_tag = true
-                    elseif line:match("tag:") then
-                        -- New tag starts, current tag scope ends
-                        in_tag = false
-                    end
-                    
-                    if in_tag then
-                        local f = line:match("dump_file:%s*(.+)")
-                        if f then
-                            dump_file = f:gsub("^%s*(.-)%s*$", "%1") -- trim whitespace
-                            -- Remove quotes if present
-                            dump_file = dump_file:gsub("^['\"]", ""):gsub("['\"]$", "")
-                            found_in_config = true
+        if dir_iter then
+            for filename in dir_iter do
+                if filename:match("%.yaml$") then
+                    local filepath = config_dir .. filename
+                    local file = io.open(filepath, "r")
+                    if file then
+                        local content = file:read("*a")
+                        file:close()
+                        
+                        local in_tag = false
+                        for line in content:gmatch("[^\r\n]+") do
+                            -- Check for tag start
+                            if line:match("tag:%s*" .. plugin_name) then
+                                in_tag = true
+                            elseif line:match("tag:") then
+                                -- New tag starts, current tag scope ends
+                                in_tag = false
+                            end
+                            
+                            if in_tag then
+                                local f = line:match("dump_file:%s*(.+)")
+                                if f then
+                                    dump_file = f:gsub("^%s*(.-)%s*$", "%1") -- trim whitespace
+                                    -- Remove quotes if present
+                                    dump_file = dump_file:gsub("^['\"]", ""):gsub("['\"]$", "")
+                                    found_in_config = true
+                                    break
+                                end
+                            end
+                        end
+                        
+                        if found_in_config then
                             break
                         end
                     end
