@@ -18,8 +18,8 @@
 2.  **设置GeoData导出**：
     - 进入 MosDNS 设置界面 -> **基本设置** -> **GeoData导出**
     然后依次添加如下的导出标签：
-    **GeoSite标签**：cn、gfw、private、geolocation-!cn、category-ads-all
-    **GeoIP标签**：cn、private
+    - **GeoSite标签**：cn、gfw、private、geolocation-!cn、category-ads-all
+    - **GeoIP标签**：cn、private
     ![GeoData导出设置](../img/GeoData.png)
 
 3.  **设置自定义配置**：
