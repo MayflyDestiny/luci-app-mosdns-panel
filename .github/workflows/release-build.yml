@@ -25,6 +25,11 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Sync PKG_VERSION with tag
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=${version}/" luci-app-mosdns-panel/Makefile
+
       - name: Build Packages
         uses: sbwml/openwrt-gh-action-sdk@go1.25
         env:
