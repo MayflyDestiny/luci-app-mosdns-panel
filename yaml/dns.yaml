@@ -139,8 +139,8 @@ plugins:
     args:
       concurrent: 1
       upstreams:
-        - addr: 218.4.4.4
-        - addr: 218.2.2.2
+        - addr: 218.4.4.4 # 修改为自己运营商的 DNS
+        - addr: 218.2.2.2 # 修改为自己运营商的 DNS
 
   # server 失败
   - tag: reject_2

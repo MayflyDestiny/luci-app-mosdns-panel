@@ -42,8 +42,8 @@ plugins:
   - tag: dns_cn
     type: "fallback"
     args:
-      primary: ali # 主dns
-      secondary: dnspod # 备用dns
+      primary: local # 主dns
+      secondary: ali # 备用dns
       threshold: 600
       always_standby: true # 副可执行插件始终待命
 
@@ -155,13 +155,15 @@ plugins:
   - tag: pre_sequence
     type: sequence
     args:
+      - matches: qname $blocklist          # 用户自定义黑名单
+        exec: reject 3
       - matches: qtype 65 # TYPE 65 类型|DNS服务器状态
         exec: $reject_qtype65
       - matches: "qname keyword::" # 无效域名
         exec: $reject_null_domain
-      - exec: $hosts # Hosts
-      - exec: jump has_resp_pre
-      - matches: qtype 12 # TYPE 12 类型|反查域名 PTR 记录
+      - matches: # TYPE 12 类型|反查域名 PTR 记录
+          - qtype 12
+          - qname $local_ptr
         exec: $query_other
       - matches: qtype 255 # TYPE 255 类型|DNS服务器拓展支持
         exec: $query_other
@@ -173,15 +175,18 @@ plugins:
   - tag: main_sequence
     type: sequence
     args:
-      # 1. CN 域名 → CN
+      # 1. Hosts
+      - exec: $hosts
+      - exec: jump has_resp_main
+      # 2. CN 域名 → CN
       - matches: qname $geosite_cn
         exec: $query_cn
       - exec: jump has_resp_main
-      # 2. NOCN 域名 → 国外
+      # 3. NOCN 域名 → 国外
       - matches: qname $geosite_nocn
         exec: $query_nocn
       - exec: jump has_resp_main
-      # 3. Fallback (未知域名，严格走国外)
+      # 4. Fallback (未知域名，严格走国外)
       - exec: $no_ecs
       - exec: $query_fallback
       - exec: jump has_resp_main

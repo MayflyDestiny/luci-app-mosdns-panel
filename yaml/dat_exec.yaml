@@ -1,5 +1,5 @@
 plugins:
-  ################## 数据源 ################
+  ################## GeoGata源 ################
   - tag: geoip_private # 私网 ip
     type: ip_set
     args:
@@ -26,19 +26,41 @@ plugins:
         - "/etc/mosdns/rule/greylist.txt" #灰名单
         - "/var/mosdns/geosite_geolocation-!cn.txt"
   
-  - tag: geosite_ads-all # 广告域名
+  ################## 本地规则源 ################
+  # 黑名单
+  - tag: blocklist
     type: domain_set
     args:
       files:
-        - "/var/mosdns/geosite_category-ads-all.txt"
-        - "/etc/mosdns/rule/blocklist.txt"  #黑名单
+        - "/etc/mosdns/rule/blocklist.txt"
   
-  # Hosts 插件
+  # DDNS 域名
+  - tag: ddnslist
+    type: domain_set
+    args:
+      files:
+        - "/etc/mosdns/rule/ddnslist.txt"
+
+  # Hosts
   - tag: hosts
     type: hosts
     args:
       files:
         - "/etc/mosdns/rule/hosts.txt"
+
+  # 重定向
+  - tag: redirect
+    type: redirect
+    args:
+      files:
+        - /etc/mosdns/rule/redirect.txt
+
+  # PTR黑名单
+  - tag: local_ptr
+    type: domain_set
+    args:
+      files:
+        - /etc/mosdns/rule/local-ptr.txt
 
   ################# 可执行插件 ################
 
