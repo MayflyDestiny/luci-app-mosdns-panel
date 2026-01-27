@@ -62,7 +62,7 @@ jobs:
 
       - name: Zip Config
         run: |
-          timestamp=$(date +%Y%m%d%H%M)
+          timestamp=$(TZ=Asia/Shanghai date +%Y%m%d%H%M)
           zip -r mosdns_custom_config_${timestamp}.zip yaml/
           echo "CONFIG_ZIP=mosdns_custom_config_${timestamp}.zip" >> $GITHUB_ENV
 
