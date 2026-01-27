@@ -23,6 +23,9 @@ local function parse_metrics(metrics_text)
     
     if not metrics_text then return data end
 
+    local latency_sum = 0
+    local latency_count = 0
+
     for line in metrics_text:gmatch("[^\r\n]+") do
         -- mosdns_cache_query_total{tag="lazy_cache"} 0
         local metric, tag, value = line:match("^(mosdns_cache_[%w_]+){tag=\"([^\"]+)\"}%s+([%d%.eE+-]+)")
@@ -34,6 +37,13 @@ local function parse_metrics(metrics_text)
                 data.caches[tag][key] = tonumber(value)
             end
         else
+            -- Check for latency metrics
+            local l_sum = line:match("^mosdns_metrics_collector_response_latency_millisecond_sum{name=\"metrics\"}%s+([%d%.eE+-]+)")
+            if l_sum then latency_sum = tonumber(l_sum) end
+            
+            local l_count = line:match("^mosdns_metrics_collector_response_latency_millisecond_count{name=\"metrics\"}%s+([%d%.eE+-]+)")
+            if l_count then latency_count = tonumber(l_count) end
+
             -- System metrics
             local sys_key, sys_val = line:match("^([%w_]+)%s+([%d%.eE+-]+)")
             if sys_key then
@@ -53,6 +63,12 @@ local function parse_metrics(metrics_text)
     end
 
     -- Calculate derived stats
+    if latency_count > 0 then
+        data.system.avg_latency = latency_sum / latency_count
+    else
+        data.system.avg_latency = 0
+    end
+
     for tag, metrics in pairs(data.caches) do
         local query_total = metrics.query_total or 0
         local hit_total = metrics.hit_total or 0
@@ -232,8 +248,8 @@ function action_plugins(...)
         -- Using grep -aoE '([a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}\.?'
         local cmd
         if path == "cache_all/dump" then
-            -- Special handling for cache_all: combine cache_cn and cache_nocn
-            cmd = string.format("(curl -s --max-time 10 'http://127.0.0.1:%s/plugins/cache_cn/dump' | gunzip -c | grep -aoE '([a-zA-Z0-9-]+\\.)+[a-zA-Z]{2,}\\.?'; curl -s --max-time 10 'http://127.0.0.1:%s/plugins/cache_nocn/dump' | gunzip -c | grep -aoE '([a-zA-Z0-9-]+\\.)+[a-zA-Z]{2,}\\.?')", port, port)
+            -- Special handling for cache_all: combine cache_cn, cache_nocn and lazy_cache
+            cmd = string.format("(curl -s --max-time 10 'http://127.0.0.1:%s/plugins/cache_cn/dump' | gunzip -c | grep -aoE '([a-zA-Z0-9-]+\\.)+[a-zA-Z]{2,}\\.?'; curl -s --max-time 10 'http://127.0.0.1:%s/plugins/cache_nocn/dump' | gunzip -c | grep -aoE '([a-zA-Z0-9-]+\\.)+[a-zA-Z]{2,}\\.?'; curl -s --max-time 10 'http://127.0.0.1:%s/plugins/lazy_cache/dump' | gunzip -c | grep -aoE '([a-zA-Z0-9-]+\\.)+[a-zA-Z]{2,}\\.?')", port, port, port)
         else
             cmd = string.format("curl -s --max-time 10 'http://127.0.0.1:%s/plugins/%s' | gunzip -c | grep -aoE '([a-zA-Z0-9-]+\\.)+[a-zA-Z]{2,}\\.?'", port, path)
         end
@@ -313,8 +329,12 @@ function action_get_log()
         end
     end
 
-    -- Read last 1000 lines
-    local content = sys.exec("tail -n 3000 " .. log_file)
+    -- Read last N lines (default 1000, max 10000)
+    local limit = tonumber(http.formvalue("limit")) or 1000
+    if limit > 10000 then limit = 10000 end
+    if limit < 100 then limit = 100 end
+
+    local content = sys.exec("tail -n " .. limit .. " " .. log_file)
     
     http.write(jsonc.stringify({success=true, content=content, file=log_file}))
 end

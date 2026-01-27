@@ -144,7 +144,13 @@
         .modal-body::-webkit-scrollbar-thumb { background-color: var(--scrollbar-thumb); border-radius: 4px; }
         
         .log-table { width: 100%; border-collapse: collapse; table-layout: auto; }
-        .log-table th, .log-table td { padding: 0.4rem 0.8rem; text-align: left; border-bottom: 1px solid var(--log-border); white-space: nowrap; transition: border-color 0.3s; }
+        .log-table th, .log-table td { 
+            padding: 0.4rem 0.8rem; 
+            text-align: left; 
+            border-bottom: 1px solid var(--log-border); 
+            white-space: nowrap; 
+            transition: border-color 0.3s; 
+        }
         .log-table th { background-color: var(--log-header-bg); color: var(--label-color); font-weight: 600; position: sticky; top: 0; z-index: 1; border-bottom: 2px solid var(--log-border); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; transition: background-color 0.3s, color 0.3s; }
         .log-table tr:hover { background-color: var(--log-hover); }
         
@@ -219,7 +225,10 @@
     <div class="control-panel">
         <div class="left-column">
             <section class="control-section">
-                <h4 class="section-title"><i class="fas fa-cogs"></i> 控制中心</h4>
+                <h4 class="section-title">
+                    <span><i class="fas fa-cogs"></i> 控制中心</span>
+                    <span id="avg-latency-display" style="margin-left:auto;font-size:0.9rem;font-weight:normal;display:flex;align-items:center;"></span>
+                </h4>
                 <div class="refresh-action-bar"><div class="auto-refresh-control"><label class="switch-label"><input type="checkbox" id="auto-refresh-toggle" class="switch-input"><span class="switch-slider"></span></label><span class="switch-label-text">自动刷新 (5s)</span></div><button id="refresh-now-btn"><i class="fas fa-sync-alt"></i> 立即刷新</button></div>
                 <div class="rule-actions-group"><div class="button-group-inline"><button id="restore-rules-btn"><i class="fas fa-save"></i> 恢复缓存规则</button><button id="flush-rules-btn" class="danger"><i class="fas fa-trash-alt"></i> 清空缓存规则</button></div><button id="restart-mosdns-btn" class="danger"><i class="fas fa-redo"></i> 重启 MosDNS 服务</button></div>
             </section>
@@ -434,21 +443,33 @@
             if (data.error) { getById('main-content').innerHTML = `<div class="error-message"><i class="fas fa-exclamation-triangle"></i><p>无法连接到 MosDNS API。</p><small>${data.error}</small></div>`; if (autoRefreshTimer) { clearInterval(autoRefreshTimer); autoRefreshTimer = null; getById('auto-refresh-toggle').checked = false; localStorage.setItem('autoRefresh', 'false');} return; }
             if (forceRebuild) { getById('main-content').innerHTML = ''; Object.values(chartInstances).forEach(c => c.destroy()); chartInstances = {}; }
             
-            // Calculate cache_all as sum of cache_cn and cache_nocn
+            // Calculate cache_all as sum of cache_cn, cache_nocn, and lazy_cache
             const cn = data.caches['cache_cn'] || { query_total: 0, hit_total: 0, lazy_hit_total: 0, size_current: 0 };
             const google = data.caches['cache_nocn'] || { query_total: 0, hit_total: 0, lazy_hit_total: 0, size_current: 0 };
-            const totalQuery = (cn.query_total || 0) + (google.query_total || 0);
-            const totalHit = (cn.hit_total || 0) + (google.hit_total || 0);
-            const totalLazyHit = (cn.lazy_hit_total || 0) + (google.lazy_hit_total || 0);
+            const lazy = data.caches['lazy_cache'] || { query_total: 0, hit_total: 0, lazy_hit_total: 0, size_current: 0 };
+            
+            const totalQuery = (cn.query_total || 0) + (google.query_total || 0) + (lazy.query_total || 0);
+            const totalHit = (cn.hit_total || 0) + (google.hit_total || 0) + (lazy.hit_total || 0);
+            const totalLazyHit = (cn.lazy_hit_total || 0) + (google.lazy_hit_total || 0) + (lazy.lazy_hit_total || 0);
             
             data.caches['cache_all'] = {
                 query_total: totalQuery,
                 hit_total: totalHit,
                 lazy_hit_total: totalLazyHit,
-                size_current: (cn.size_current || 0) + (google.size_current || 0),
+                size_current: (cn.size_current || 0) + (google.size_current || 0) + (lazy.size_current || 0),
                 hit_rate: totalQuery > 0 ? (totalHit / totalQuery * 100).toFixed(2) + '%' : '0.00%',
                 lazy_hit_rate: totalQuery > 0 ? (totalLazyHit / totalQuery * 100).toFixed(2) + '%' : '0.00%'
             };
+
+            const avgLatency = data.system?.avg_latency;
+            const latencyEl = getById('avg-latency-display');
+            if (latencyEl) {
+                if (avgLatency !== undefined) {
+                     latencyEl.innerHTML = `<i class="fas fa-bolt" style="color:var(--accent-color);margin-right:0.3rem;"></i> 平均延迟: <span style="color:var(--value-color);font-weight:bold;">${parseFloat(avgLatency).toFixed(2)} ms</span>`;
+                } else {
+                     latencyEl.innerHTML = '';
+                }
+            }
 
             cacheOrder.forEach(tag => {
                 let card = D.querySelector(`.card[data-tag="${tag}"]`);
@@ -537,27 +558,49 @@
         
         
         let logDataCache = [];
+        let lastLogContent = '';
         let lastLogClearTime = 0;
         let currentSort = { column: 'time', direction: 'desc' };
         let columnSettings = [];
         let logRefreshTimer = null;
         let isLogAutoRefreshEnabled = false;
+        let logFilterDebounceTimer = null;
+        let logLastScrollTime = 0;
+        const LOG_BATCH_SIZE = 100;
+        let displayedLogCount = 0;
+        let currentFilteredLogs = [];
+        let logScrollListener = null;
+
         const colHeadersMap = {
-            'time': '时间', 'level': '级别', 'comp': '组件', 'event': '事件',
-            'qname': '域名 (qname)', 'qtype': '类型 (qtype)', 'client': '客户端',
-            'rcode': 'RCode', 'elapsed': '耗时', 'upstream': '上游', 'error': '错误'
+            'time': '时间 (time)', 'level': '级别 (level)', 'comp': '组件 (comp)',
+            'event': '事件 (event)', 'uqid': '查询ID (uqid)', 'client': '客户端 (client)',
+            'qname': '域名 (qname)', 'qtype': '类型 (qtype)', 'qclass': '类 (qclass)',
+            'rcode': '响应码 (rcode)', 'elapsed': '耗时 (elapsed)', 'addr': '地址 (addr)',
+            'tls': '是否 TLS (tls)', 'tag': '标签 (tag)', 'type': '类型 (type)',
+            'file': '文件 (file)', 'entries': '条目数 (entries)', 'length': '长度 (length)',
+            'upstream': '上游 (upstream)', 'error': '错误 (error)'
         };
 
         function fetchLogs(silent = false) {
              if (!silent) getById('log-container').innerHTML = '<div style="padding:2rem;text-align:center;color:var(--label-color);"><i class="fas fa-circle-notch fa-spin fa-2x"></i><p style="margin-top:1rem;">Loading logs...</p></div>';
              
-             fetch('/cgi-bin/luci/mosdns_panel/api/get_log')
+             // Request 5000 lines (backend max 10000)
+             fetch('/cgi-bin/luci/mosdns_panel/api/get_log?limit=5000')
                 .then(res => res.json())
                 .then(data => {
                     if (data.success) {
+                        // Optimization: Skip if content hasn't changed
+                        if (silent && data.content === lastLogContent) {
+                            return;
+                        }
+                        lastLogContent = data.content;
+
                         logDataCache = parseLogs(data.content);
                         updateColumnSettingsFromData(logDataCache);
                         if (!silent) renderColumnSettingsPanel();
+                        if (silent && Date.now() - logLastScrollTime < 1000) {
+                            return;
+                        }
                         applyLogFilters();
                     } else {
                         if (!silent) getById('log-container').innerHTML = `<div style="padding:2rem;text-align:center;color:var(--error-color);"><i class="fas fa-exclamation-circle fa-2x"></i><p style="margin-top:1rem;">Error: ${data.error}</p></div>`;
@@ -658,6 +701,28 @@
         }
 
         function exportLogs() {
+            if (!currentFilteredLogs || currentFilteredLogs.length === 0) {
+                alert('没有可导出的日志 (当前筛选结果为空)');
+                return;
+            }
+
+            const total = currentFilteredLogs.length;
+            // Ask user for limit
+            const input = prompt(`当前筛选结果共 ${total} 条日志。\n请输入要导出的行数 (从第一条开始，留空或输入 "all" 导出全部):`, "all");
+            
+            if (input === null) return; // User cancelled
+            
+            let limit = total;
+            const val = input.trim().toLowerCase();
+            if (val !== '' && val !== 'all') {
+                const parsed = parseInt(val, 10);
+                if (!isNaN(parsed) && parsed > 0) {
+                    limit = parsed;
+                }
+            }
+            
+            const logsToExport = limit >= total ? currentFilteredLogs : currentFilteredLogs.slice(0, limit);
+
             // Find the export button to show loading state
             const exportBtn = document.querySelector('button[onclick="exportLogs()"]');
             const originalIcon = exportBtn ? exportBtn.innerHTML : '';
@@ -671,24 +736,9 @@
             // Use setTimeout to yield to main thread for UI update
             setTimeout(() => {
                 try {
-                    const level = getById('log-filter-level').value;
-                    const text = getById('log-filter-text').value.toLowerCase();
-                    
-                    const filtered = logDataCache.filter(log => {
-                        if (lastLogClearTime > 0 && log._ts <= lastLogClearTime) return false;
-                        if (level !== 'ALL' && log.level !== level) return false;
-                        if (text && !log._raw.toLowerCase().includes(text)) return false;
-                        return true;
-                    });
-                    
-                    if (filtered.length === 0) {
-                        alert('没有可导出的日志 (当前筛选结果为空)');
-                        return;
-                    }
-                    
                     // Generate content with converted timezone (Asia/Shanghai)
                     // Using map to create array of strings is more efficient for Blob than joining a huge string
-                    const contentChunks = filtered.map(log => {
+                    const contentChunks = logsToExport.map(log => {
                         // Replace the original timestamp (assumed at start) with the formatted local time
                         let line = log._raw;
                         // Try tab separation first (MosDNS standard)
@@ -770,10 +820,16 @@
                                     <div onclick="selectLogFilter('DEBUG')"><span class="log-level level-DEBUG">DEBUG</span></div>
                                 </div>
                             </div>
-                            <input type="text" id="log-filter-text" class="log-search" onkeyup="applyLogFilters()" placeholder="搜索日志内容...">
+                            <input type="text" id="log-filter-text" class="log-search" oninput="scheduleApplyLogFilters()" placeholder="搜索日志内容...">
                         </div>
                         <div id="col-settings-panel" class="settings-panel">
-                            <h4 class="log-settings-header">显示列设置 <button onclick="toggleColumnSettings()" class="settings-close-btn" title="关闭">&times;</button></h4>
+                            <h4 class="log-settings-header">
+                                列设置 
+                                <div style="display:flex;gap:0.5rem;">
+                                    <button onclick="resetColumnSettings()" class="action-btn small" title="重置为默认"><i class="fas fa-undo"></i></button>
+                                    <button onclick="toggleColumnSettings()" class="settings-close-btn" title="关闭">&times;</button>
+                                </div>
+                            </h4>
                             <div id="col-settings-list" class="log-settings-list"></div>
                             <div style="margin-top:0.5rem;text-align:right;font-size:0.8rem;color:var(--label-color);">拖拽调整顺序</div>
                         </div>
@@ -783,6 +839,13 @@
             `;
             div.onclick = (e) => { if(e.target === div) closeLogModal(); };
             D.body.appendChild(div);
+
+            const modalBody = div.querySelector('.modal-body');
+            if (modalBody) {
+                modalBody.addEventListener('scroll', () => {
+                    logLastScrollTime = Date.now();
+                }, { passive: true });
+            }
 
             // Click outside to close column settings
             document.addEventListener('click', (e) => {
@@ -804,6 +867,7 @@
             });
 
             window.applyLogFilters = applyLogFilters;
+            window.scheduleApplyLogFilters = scheduleApplyLogFilters;
             window.sortLogs = sortLogs;
             window.toggleColumnSettings = toggleColumnSettings;
             window.updateColumnVisibility = updateColumnVisibility;
@@ -899,7 +963,7 @@
                     }
                 } catch(e) {}
 
-                return { time: displayTime, level, comp, event, ...details, _raw: line, _ts: timestamp };
+                return { time: displayTime, level, comp, event, ...details, _raw: line, _rawLower: line.toLowerCase(), _ts: timestamp };
             }).filter(x => x).reverse(); // Default new to old
         }
 
@@ -914,7 +978,8 @@
             let filtered = logDataCache.filter(log => {
                 if (lastLogClearTime > 0 && log._ts <= lastLogClearTime) return false;
                 if (level !== 'ALL' && log.level !== level) return false;
-                if (text && !log._raw.toLowerCase().includes(text)) return false;
+                const haystack = log._rawLower || log._raw.toLowerCase();
+                if (text && !haystack.includes(text)) return false;
                 return true;
             });
             
@@ -933,7 +998,16 @@
                 return 0;
             });
 
-            renderTable(filtered);
+            currentFilteredLogs = filtered;
+            displayedLogCount = 0; // Reset
+            renderTable(true); // true = initial render (reset)
+        }
+
+        function scheduleApplyLogFilters() {
+            if (logFilterDebounceTimer) clearTimeout(logFilterDebounceTimer);
+            logFilterDebounceTimer = setTimeout(() => {
+                applyLogFilters();
+            }, 250);
         }
 
         function sortLogs(column) {
@@ -946,30 +1020,72 @@
             applyLogFilters();
         }
 
-        function renderTable(logs) {
+
+
+        function renderTable(reset = false) {
             const container = getById('log-container');
-            if (logs.length === 0) {
+            if (!container) return;
+            
+            const total = currentFilteredLogs.length;
+            if (total === 0) {
                 container.innerHTML = '<div style="padding:2rem;text-align:center;color:#858585;">未找到匹配的日志。</div>';
                 return;
             }
             
+            // Calculate next batch
+            const start = reset ? 0 : displayedLogCount;
+            const remaining = total - displayedLogCount;
+            const batch = remaining > LOG_BATCH_SIZE ? LOG_BATCH_SIZE : remaining;
+            
+            if (batch <= 0) return; // Nothing more to add
+            
+            const logsToRender = currentFilteredLogs.slice(start, start + batch);
+            displayedLogCount += batch;
+            
             // Get active columns
             const activeCols = columnSettings.filter(c => c.visible);
             
-            const table = createElement('table', 'log-table');
-            let theadHtml = '<thead><tr>';
-            activeCols.forEach(col => {
-                const sortIcon = currentSort.column === col.key 
-                    ? (currentSort.direction === 'asc' ? '<i class="fas fa-sort-up"></i>' : '<i class="fas fa-sort-down"></i>')
-                    : '<i class="fas fa-sort" style="opacity:0.3"></i>';
+            let tbody;
+            if (reset) {
+                const table = createElement('table', 'log-table');
+                let theadHtml = '<thead><tr>';
+                activeCols.forEach(col => {
+                    const sortIcon = currentSort.column === col.key 
+                        ? (currentSort.direction === 'asc' ? '<i class="fas fa-sort-up"></i>' : '<i class="fas fa-sort-down"></i>')
+                        : '<i class="fas fa-sort" style="opacity:0.3"></i>';
+                    
+                    theadHtml += `<th data-key="${col.key}" onclick="sortLogs('${col.key}')" style="cursor:pointer;user-select:none;white-space:nowrap;">${col.label} ${sortIcon}</th>`;
+                });
+                theadHtml += '</tr></thead>';
+                table.innerHTML = theadHtml + '<tbody></tbody>';
+                tbody = table.querySelector('tbody');
+
+                container.innerHTML = '';
+                container.appendChild(table);
                 
-                theadHtml += `<th onclick="sortLogs('${col.key}')" style="cursor:pointer;user-select:none;white-space:nowrap;">${col.label} ${sortIcon}</th>`;
-            });
-            theadHtml += '</tr></thead>';
-            table.innerHTML = theadHtml + '<tbody></tbody>';
-            const tbody = table.querySelector('tbody');
+                // Add infinite scroll listener
+                const modalBody = container.closest('.modal-body'); 
+                
+                if (logScrollListener) {
+                    container.removeEventListener('scroll', logScrollListener);
+                }
+                
+                logScrollListener = () => {
+                    logLastScrollTime = Date.now(); // For auto-refresh pause logic
+                    if (container.scrollTop + container.clientHeight >= container.scrollHeight - 50) {
+                         if (displayedLogCount < currentFilteredLogs.length) {
+                             renderTable(false);
+                         }
+                    }
+                };
+                container.addEventListener('scroll', logScrollListener, { passive: true });
+                
+            } else {
+                tbody = container.querySelector('tbody');
+            }
             
-            logs.forEach(log => {
+            const fragment = document.createDocumentFragment();
+            logsToRender.forEach(log => {
                 const tr = createElement('tr');
                 let rowHtml = '';
                 activeCols.forEach(col => {
@@ -985,30 +1101,83 @@
                     rowHtml += `<td class="${cellClass}">${val}</td>`;
                 });
                 tr.innerHTML = rowHtml;
-                tbody.appendChild(tr);
+                fragment.appendChild(tr);
             });
             
-            container.innerHTML = '';
-            container.appendChild(table);
+            if (tbody) tbody.appendChild(fragment);
+            
+            // Update info bar (append or update?)
+            // We don't use info bar for "only showing 800" anymore.
+            // But maybe we want to show "Showing X of Y logs"?
+            // Let's create a sticky footer or header for this? Or just ignore for now as requested "dynamic loading".
         }
 
         function updateColumnSettingsFromData(logs) {
             const keys = new Set(['time', 'level', 'comp', 'event']);
             logs.forEach(log => {
                 Object.keys(log).forEach(key => {
-                    if (key !== '_raw') keys.add(key);
+                    if (!key.startsWith('_')) keys.add(key);
                 });
             });
             
-            keys.forEach(key => {
-                if (!columnSettings.find(c => c.key === key)) {
-                    columnSettings.push({
-                        key: key,
-                        visible: true,
-                        label: colHeadersMap[key] || key
+            // Try load saved settings
+            const savedSettings = localStorage.getItem('mosdns_log_cols');
+            if (savedSettings) {
+                try {
+                    const saved = JSON.parse(savedSettings);
+                    // Merge saved with current keys
+                    const savedKeys = new Set(saved.map(c => c.key));
+                    
+                    // 1. Add saved columns first (maintaining order and visibility)
+                    columnSettings = saved.filter(c => keys.has(c.key)).map(c => {
+                        return {
+                            key: c.key,
+                            visible: c.visible,
+                            label: colHeadersMap[c.key] || c.key
+                        };
                     });
+                    
+                    // 2. Add any new keys that weren't saved
+                    keys.forEach(key => {
+                        if (!savedKeys.has(key)) {
+                            columnSettings.push({
+                                key: key,
+                                visible: true,
+                                label: colHeadersMap[key] || key
+                            });
+                        }
+                    });
+                } catch(e) {
+                    console.error('Failed to load saved column settings:', e);
+                    // Fallback to default logic below if error
+                    columnSettings = [];
                 }
-            });
+            }
+
+            // Default init if empty
+            if (columnSettings.length === 0) {
+                keys.forEach(key => {
+                    if (!columnSettings.find(c => c.key === key)) {
+                        columnSettings.push({
+                            key: key,
+                            visible: true,
+                            label: colHeadersMap[key] || key
+                        });
+                    }
+                });
+            } else {
+                 // Ensure all discovered keys are present even if we loaded saved settings
+                 // (handled above in step 2, but double check just in case logic flow missed something)
+                 keys.forEach(key => {
+                    if (!columnSettings.find(c => c.key === key)) {
+                        columnSettings.push({
+                            key: key,
+                            visible: true,
+                            label: colHeadersMap[key] || key
+                        });
+                    }
+                });
+            }
         }
 
         function toggleColumnSettings() {
@@ -1041,6 +1210,7 @@
             const col = columnSettings.find(c => c.key === key);
             if (col) {
                 col.visible = visible;
+                saveColumnSettings(); // Save on visibility change
                 // Update UI active state
                 const item = document.querySelector(`.col-setting-item[data-key="${key}"]`);
                 if (item) {
@@ -1049,6 +1219,25 @@
                 }
                 applyLogFilters();
             }
+        }
+        
+        function saveColumnSettings() {
+            // Save key and visible status
+            const toSave = columnSettings.map(c => ({ 
+                key: c.key, 
+                visible: c.visible
+            }));
+            localStorage.setItem('mosdns_log_cols', JSON.stringify(toSave));
+        }
+
+        function resetColumnSettings() {
+            if(!confirm('确定要重置列设置吗？这将恢复默认的列顺序和显示状态。')) return;
+            localStorage.removeItem('mosdns_log_cols');
+            columnSettings = [];
+            // Re-discover columns from cache to reset
+            updateColumnSettingsFromData(logDataCache);
+            renderColumnSettingsPanel();
+            applyLogFilters();
         }
 
         function addDragEvents(item) {
@@ -1059,6 +1248,7 @@
             item.addEventListener('dragend', () => {
                 item.classList.remove('dragging');
                 updateSettingsOrder();
+                saveColumnSettings(); // Save on reorder
                 applyLogFilters();
             });
             item.addEventListener('dragover', e => {
@@ -1127,7 +1317,8 @@
              const logs = logDataCache.filter(log => {
                 if (lastLogClearTime > 0 && log._ts <= lastLogClearTime) return false;
                 if (level !== 'ALL' && log.level !== level) return false;
-                if (text && !log._raw.toLowerCase().includes(text)) return false;
+                const haystack = log._rawLower || log._raw.toLowerCase();
+                if (text && !haystack.includes(text)) return false;
                 return true;
              });
              

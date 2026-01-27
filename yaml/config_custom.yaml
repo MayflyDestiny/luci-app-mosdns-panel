@@ -44,7 +44,7 @@ plugins:
     args:
       primary: local # 主dns
       secondary: ali # 备用dns
-      threshold: 600
+      threshold: 600 # 无响应切换 毫秒
       always_standby: true # 副可执行插件始终待命
 
   - tag: dns_nocn_seq
@@ -81,9 +81,13 @@ plugins:
   - tag: query_cn
     type: sequence
     args:
+      - exec: prefer_ipv4
       - exec: $cache_cn
-      - matches: has_resp # 命中了 cn cache
+      - matches: has_resp
+        exec: query_summary cache_cn_hit
+      - matches: has_resp
         exec: accept
+      - exec: $ecs_cn
       - exec: $dns_cn_seq
       - matches: "!resp_ip $geoip_cn" # 响应非 cn ip
         exec: drop_resp # 丢弃
@@ -92,10 +96,13 @@ plugins:
   - tag: query_nocn
     type: sequence
     args:
-      - exec: $cache_nocn
-      - matches: has_resp # 命中了 nocn cache
-        exec: accept
       - exec: prefer_ipv4
+      - exec: $cache_nocn
+      - matches: has_resp
+        exec: query_summary cache_nocn_hit
+      - matches: has_resp
+        exec: accept
+      - exec: $no_ecs
       - exec: $dns_nocn_seq
 
     # query fallback
@@ -103,7 +110,9 @@ plugins:
     type: sequence
     args:
       - exec: $cache_nocn
-      - matches: has_resp # 命中了 cn cache
+      - matches: has_resp
+        exec: query_summary cache_nocn_hit
+      - matches: has_resp
         exec: accept
       - exec: $no_ecs
       - exec: $fallback_seq
@@ -113,7 +122,9 @@ plugins:
     type: sequence
     args:
       - exec: $cache_cn
-      - matches: has_resp # 命中了 cn cache
+      - matches: has_resp
+        exec: query_summary cache_cn_hit
+      - matches: has_resp
         exec: accept
       # - exec: $no_ecs
       - exec: $local_seq
@@ -122,6 +133,11 @@ plugins:
   - tag: query_other 
     type: sequence
     args:
+      - exec: $lazy_cache
+      - matches: has_resp
+        exec: query_summary cache_lazy_hit
+      - matches: has_resp
+        exec: accept
       - exec: $no_ecs 
       - exec: $other_seq
 
@@ -155,7 +171,7 @@ plugins:
   - tag: pre_sequence
     type: sequence
     args:
-      - matches: qname $blocklist          # 用户自定义黑名单
+      - matches: qname $blocklist # 用户自定义黑名单
         exec: reject 3
       - matches: qtype 65 # TYPE 65 类型|DNS服务器状态
         exec: $reject_qtype65
@@ -187,7 +203,6 @@ plugins:
         exec: $query_nocn
       - exec: jump has_resp_main
       # 4. Fallback (未知域名，严格走国外)
-      - exec: $no_ecs
       - exec: $query_fallback
       - exec: jump has_resp_main
 
