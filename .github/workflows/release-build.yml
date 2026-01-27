@@ -24,15 +24,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
-      - name: Restore SDK cache
-        id: sdk-cache
-        uses: actions/cache@v4
-        with:
-          path: ./sdk
-          key: openwrt-sdk-${{ matrix.arch }}-${{ matrix.sdk }}-${{ hashFiles('luci-app-mosdns-panel/Makefile') }}
-          restore-keys: |
-            openwrt-sdk-${{ matrix.arch }}-${{ matrix.sdk }}-
       
       - name: Sync PKG_VERSION with tag
         run: |
@@ -46,8 +37,6 @@ jobs:
           FEEDNAME: packages_ci
           PACKAGES: luci-app-mosdns-panel
           NO_REFRESH_CHECK: true
-          SDK_CACHE_PATH: ./sdk
-          SDK_WORKSPACE_DIR: ./sdk
           
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
