@@ -16,6 +16,7 @@ plugins:
     args:
       files:
         - "/var/mosdns/geosite_cn.txt"
+        - "/var/mosdns/geosite_private.txt"
         - "/etc/mosdns/rule/whitelist.txt"      
 
   - tag: geosite_nocn # gfw 域名
@@ -118,7 +119,7 @@ plugins:
     type: "ecs_handler"
     args:
       forward: true # 是否转发来自下游的 ecs
-      preset: 49.85.216.154 # 发送预设 ecs,你的本地公网ip
+      preset: "49.85.216.154" # 发送预设 ecs,你的本地公网ip
       send: false # 是否发送 ecs
       mask4: 24 # ipv4 掩码。默认 24
       mask6: 48 # ipv6 掩码。默认 48

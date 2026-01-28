@@ -11,34 +11,8 @@ include:
   - "/etc/mosdns/dns.yaml"
 
 plugins:
-  - tag: reject_null_domain
-    type: sequence
-    args:
-      - exec: query_summary reject_null_domain
-      - exec: $reject_3
-
-  - tag: reject_qtype65
-    type: sequence
-    args:
-      - exec: query_summary reject_qtype65
-      - exec: $reject_3
-
-  - tag: reject_ad
-    type: sequence
-    args:
-      - exec: query_summary reject_adlist
-      - exec: $reject_3
-
-  ################ 序列 #################
-  - tag: dns_nocn
-    type: "fallback"
-    args:
-      primary: cloudflare # 主dns
-      secondary: google # 备用dns
-      threshold: 600 # 无响应切换 毫秒
-      always_standby: true # 副可执行插件始终待命
-  
-  # dns-cn 序列
+  # ============== DNS转发 ==============
+  # dns-cn 转发
   - tag: dns_cn
     type: "fallback"
     args:
@@ -47,17 +21,69 @@ plugins:
       threshold: 600 # 无响应切换 毫秒
       always_standby: true # 副可执行插件始终待命
 
-  - tag: dns_nocn_seq
+  # dns-nocn 转发
+  - tag: dns_nocn
+    type: "fallback"
+    args:
+      primary: cloudflare # 主dns
+      secondary: google # 备用dns
+      threshold: 600 # 无响应切换 毫秒
+      always_standby: true # 副可执行插件始终待命
+
+  # ============== LOG通知 ==============
+  # 阻断通知(reject)
+  - tag: reject_null_domain
     type: sequence
     args:
-      - exec: query_summary dns_nocn
-      - exec: $dns_nocn
+      - exec: query_summary reject_null_domain
+      - exec: reject 3
 
+  - tag: reject_qtype65
+    type: sequence
+    args:
+      - exec: query_summary reject_qtype65
+      - exec: reject 3
+  
+  # 缓存命中通知(cache_hit)
+  - tag: cache_cn_hit
+    type: sequence
+    args:
+      - exec: $cache_cn
+      - matches: has_resp
+        exec: query_summary cache_cn_hit
+      - matches: has_resp
+        exec: accept
+
+  - tag: cache_nocn_hit
+    type: sequence
+    args:
+      - exec: $cache_nocn
+      - matches: has_resp
+        exec: query_summary cache_nocn_hit
+      - matches: has_resp
+        exec: accept
+
+  - tag: cache_lazy_hit
+    type: sequence
+    args:
+      - exec: $lazy_cache
+      - matches: has_resp
+        exec: query_summary cache_lazy_hit
+      - matches: has_resp
+        exec: accept
+
+  # DNS查询通知(dns_seq)
   - tag: dns_cn_seq
     type: sequence
     args:
       - exec: query_summary dns_cn
       - exec: $dns_cn
+  
+  - tag: dns_nocn_seq
+    type: sequence
+    args:
+      - exec: query_summary dns_nocn
+      - exec: $dns_nocn
 
   - tag: local_seq
     type: sequence
@@ -77,16 +103,13 @@ plugins:
       - exec: query_summary other
       - exec: $dns_cn
 
+  # ============== 查询处理 ==============
   # query cn 域名
   - tag: query_cn
     type: sequence
     args:
       - exec: prefer_ipv4
-      - exec: $cache_cn
-      - matches: has_resp
-        exec: query_summary cache_cn_hit
-      - matches: has_resp
-        exec: accept
+      - exec: $cache_cn_hit
       - exec: $ecs_cn
       - exec: $dns_cn_seq
       - matches: "!resp_ip $geoip_cn" # 响应非 cn ip
@@ -97,23 +120,18 @@ plugins:
     type: sequence
     args:
       - exec: prefer_ipv4
-      - exec: $cache_nocn
-      - matches: has_resp
-        exec: query_summary cache_nocn_hit
-      - matches: has_resp
-        exec: accept
+      - exec: $cache_nocn_hit
       - exec: $no_ecs
       - exec: $dns_nocn_seq
+      - matches: "resp_ip $geoip_cn" # 响应为 cn ip
+        exec: drop_resp # 丢弃
 
   # query fallback
   - tag: query_fallback
     type: sequence
     args:
-      - exec: $cache_cn
-      - matches: has_resp
-        exec: query_summary cache_nocn_hit
-      - matches: has_resp
-        exec: accept
+      - exec: prefer_ipv4
+      - exec: $cache_lazy_hit
       - exec: $no_ecs
       - exec: $fallback_seq
     
@@ -121,11 +139,7 @@ plugins:
   - tag: query_lan
     type: sequence
     args:
-      - exec: $cache_cn
-      - matches: has_resp
-        exec: query_summary cache_cn_hit
-      - matches: has_resp
-        exec: accept
+      - exec: $cache_cn_hit
       # - exec: $no_ecs
       - exec: $local_seq
 
@@ -133,20 +147,19 @@ plugins:
   - tag: query_other 
     type: sequence
     args:
-      - exec: $lazy_cache
-      - matches: has_resp
-        exec: query_summary cache_lazy_hit
-      - matches: has_resp
-        exec: accept
+      - exec: $cache_lazy_hit
       - exec: $no_ecs 
       - exec: $other_seq
 
+  # ============== 响应处理 ==============
+  # 预结束处理(pre_handle)
   - tag: pre_handle
     type: sequence
     args:
       - exec: $ttl_1h # ttl 1h
       - exec: accept # 接受响应,终止流程
 
+  # 主结束处理(main_handle)
   - tag: main_handle
     type: sequence
     args:
@@ -180,7 +193,7 @@ plugins:
       - matches: # TYPE 12 类型|反查域名 PTR 记录
           - qtype 12
           - qname $local_ptr
-        exec: $query_other
+        exec: reject 3
       - matches: qtype 255 # TYPE 255 类型|DNS服务器拓展支持
         exec: $query_other
       - matches: ptr_ip $geoip_private # private ip
@@ -206,6 +219,7 @@ plugins:
       - exec: $query_fallback
       - exec: jump has_resp_main
 
+  # 查询流程(sequence)
   - tag: sequence
     type: sequence
     args:

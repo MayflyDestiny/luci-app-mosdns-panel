@@ -73,25 +73,7 @@ plugins:
   - tag: local
     type: forward
     args:
-      concurrent: 1
+      concurrent: 2
       upstreams:
         - addr: 218.4.4.4 # 修改为自己运营商的 DNS
         - addr: 218.2.2.2 # 修改为自己运营商的 DNS
-
-  # server 失败
-  - tag: reject_2
-    type: sequence
-    args:
-      - exec: reject 2
-
-  # 拒绝响应
-  - tag: reject_3
-    type: sequence
-    args:
-      - exec: reject 3
-
-  # 不支持的操作
-  - tag: reject_5
-    type: sequence
-    args:
-      - exec: reject 5
