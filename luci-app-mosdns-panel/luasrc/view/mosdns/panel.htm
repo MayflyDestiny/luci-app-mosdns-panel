@@ -7,7 +7,7 @@
         </a>
     </h2>
     <div class="cbi-section">
-        <iframe id="mosdns-panel-frame" src="/luci-static/resources/mosdns-panel/index.html?mode=embedded" style="width:100%; min-height:800px; border:none; border-radius: 4px; box-shadow: 0 0 5px rgba(0,0,0,0.1);" scrolling="no"></iframe>
+        <iframe id="mosdns-panel-frame" src="/luci-static/resources/mosdns-panel/index.html?mode=embedded&api_url=<%=luci.dispatcher.build_url("admin", "mosdns_panel", "api", "status")%>" style="width:100%; min-height:800px; border:none; border-radius: 4px; box-shadow: 0 0 5px rgba(0,0,0,0.1);" scrolling="no"></iframe>
         <script type="text/javascript">
             (function() {
                 var frame = document.getElementById('mosdns-panel-frame');
