@@ -2,15 +2,16 @@ module("luci.controller.mosdns_panel", package.seeall)
 
 function index()
     -- API endpoint for the panel to fetch status
-    entry({"mosdns_panel", "api", "status"}, call("action_status")).public = true
-    entry({"mosdns_panel", "api", "background_status"}, call("action_bg_status")).public = true
-    entry({"mosdns_panel", "api", "upload_background"}, call("action_upload_background")).public = true
-    entry({"mosdns_panel", "api", "remove_background"}, call("action_remove_background")).public = true
-    entry({"mosdns_panel", "api", "restart"}, call("action_restart")).public = true
-    entry({"mosdns_panel", "api", "get_log"}, call("action_get_log")).public = true
-    entry({"mosdns_panel", "api", "clear_log"}, call("action_clear_log")).public = true
-    entry({"mosdns_panel", "api", "restore_dump"}, call("action_restore_dump")).leaf = true
-    entry({"mosdns_panel", "plugins"}, call("action_plugins")).leaf = true
+    -- Placing under "admin" ensures Luci session authentication is required
+    entry({"admin", "mosdns_panel", "api", "status"}, call("action_status"))
+    entry({"admin", "mosdns_panel", "api", "background_status"}, call("action_bg_status"))
+    entry({"admin", "mosdns_panel", "api", "upload_background"}, call("action_upload_background"))
+    entry({"admin", "mosdns_panel", "api", "remove_background"}, call("action_remove_background"))
+    entry({"admin", "mosdns_panel", "api", "restart"}, call("action_restart"))
+    entry({"admin", "mosdns_panel", "api", "get_log"}, call("action_get_log"))
+    entry({"admin", "mosdns_panel", "api", "clear_log"}, call("action_clear_log"))
+    entry({"admin", "mosdns_panel", "api", "restore_dump"}, call("action_restore_dump")).leaf = true
+    entry({"admin", "mosdns_panel", "plugins"}, call("action_plugins")).leaf = true
 end
 
 local function parse_metrics(metrics_text)

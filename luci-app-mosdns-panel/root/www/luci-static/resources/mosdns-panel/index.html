@@ -259,7 +259,7 @@
         </div>
     </footer>
     <script>
-        const API_URL = '/cgi-bin/luci/mosdns_panel/api/status'; const REFRESH_INTERVAL = 5000;
+        const API_URL = '/cgi-bin/luci/admin/mosdns_panel/api/status'; const REFRESH_INTERVAL = 5000;
         let chartInstances = {}; let autoRefreshTimer = null; let currentTheme = 'light';
         Chart.register(ChartDataLabels); Chart.defaults.plugins.legend.display = false; Chart.defaults.plugins.datalabels.font.weight = 'bold'; Chart.defaults.plugins.datalabels.font.size = 11; Chart.defaults.cutout = '70%'; Chart.defaults.responsive = true; Chart.defaults.maintainAspectRatio = false;
         Chart.defaults.plugins.datalabels.formatter = (v, c) => { const s = c.chart.data.datasets[0].data.reduce((a, b) => a + b, 0); return s > 0 && v / s > 0.05 ? `${(v / s * 100).toFixed(0)}%` : ''; };
@@ -339,7 +339,24 @@
         function updateThemeButtons(activeMode) { const ts = getById('theme-selector'); ts.innerHTML = ''; ['light', 'dark'].forEach(mode => { if (!themeMap[mode]) return; const t = themeMap[mode]; const btn = createElement('button', 'control-base-label'); btn.dataset.theme = mode; btn.innerHTML = `<i class="fas ${t.icon}"></i> ${t.name}`; if (mode === activeMode) btn.classList.add('active'); btn.onclick = () => setTheme(mode); ts.appendChild(btn); }); }
         function setTheme(mode) { currentTheme = mode; const theme = themeMap[mode]; if(!theme) return; Object.entries(theme.cssVars).forEach(([key, value]) => D.documentElement.style.setProperty(key, value)); const oldExtraStyle = getById('theme-extra-styles'); if (oldExtraStyle) oldExtraStyle.remove(); if (theme.extraStyles) { const style = createElement('style', '', '', 'theme-extra-styles'); style.textContent = Object.entries(theme.extraStyles).map(([sel, rule]) => `${sel} { ${rule} }`).join('\n'); D.head.appendChild(style); } localStorage.setItem('theme', mode); updateThemeButtons(mode); setTimeout(() => { Object.values(chartInstances).forEach(c => c.destroy()); chartInstances = {}; refreshData(true, true); }, 50); }
 
-        async function fetchAPI(url) { try { const r = await fetch(url); if (!r.ok) throw new Error(`网络响应错误: ${r.statusText} (${r.status})`); return await r.json(); } catch (e) { console.error(`Fetch error from ${url}:`, e); return {error: e.message}; } }
+        async function fetchAPI(url) { 
+            try { 
+                const r = await fetch(url); 
+                if (r.status === 401 || r.status === 403) {
+                    throw new Error('未授权，请先登录 Luci 管理界面。');
+                }
+                const contentType = r.headers.get('content-type');
+                if (!contentType || !contentType.includes('application/json')) {
+                    // Luci might redirect to login page (text/html)
+                    throw new Error('会话已超时或未登录，请重新登录。');
+                }
+                const data = await r.json(); 
+                return data;
+            } catch (e) { 
+                console.error(`Fetch error from ${url}:`, e); 
+                return {error: e.message}; 
+            } 
+        }
         function createCacheCard(tag, title) { const c = createElement('div', 'card'); c.dataset.tag = tag; c.innerHTML = `<h2><i class="fas fa-server"></i><span class="title-text">${title}</span><span class="status-dot" id="status-dot-${tag}"></span></h2><div class="card-title-gradient-bar"></div><div class="metrics-container" id="metrics-${tag}"></div><div class="charts" id="charts-${tag}"><div class="chart-container"><canvas id="chart-hit-${tag}"></canvas></div><div class="chart-container"><canvas id="chart-lazy-${tag}"></canvas></div></div>`; return c; }
         function createOrUpdatePieChart(id, title, hit, total) { 
             const ctx = getById(id); if (!ctx) return; 
@@ -513,14 +530,28 @@
             };
             const autoRefreshToggle = getById('auto-refresh-toggle');
             autoRefreshToggle.onchange = (e) => { const isEnabled = e.target.checked; localStorage.setItem('autoRefresh', isEnabled); if (isEnabled) { if (!autoRefreshTimer) autoRefreshTimer = setInterval(() => refreshData(false, true, true), REFRESH_INTERVAL); } else if (autoRefreshTimer) { clearInterval(autoRefreshTimer); autoRefreshTimer = null; } };
-            const multiAction = (btnId, paths, msg) => { getById(btnId).addEventListener('click', () => { if (confirm(msg)) Promise.all(paths.map(p => fetch(`/cgi-bin/luci/mosdns_panel/plugins/${p}`))).then(() => alert('✅ 操作完成')).catch(e => alert(`❌ 操作失败: ${e.message}`)); }); };
+            const multiAction = (btnId, paths, msg) => { 
+                getById(btnId).addEventListener('click', () => { 
+                    if (confirm(msg)) {
+                        Promise.all(paths.map(p => fetchAPI(`/cgi-bin/luci/admin/mosdns_panel/plugins/${p}`)))
+                            .then(results => {
+                                const errors = results.filter(r => r.error);
+                                if (errors.length > 0) {
+                                    alert(`❌ 操作部分失败:\n${errors.map(e => e.error).join('\n')}`);
+                                } else {
+                                    alert('✅ 操作完成');
+                                }
+                            })
+                            .catch(e => alert(`❌ 操作失败: ${e.message}`)); 
+                    }
+                }); 
+            };
             
             getById('restore-rules-btn').onclick = () => {
                 if(confirm('确定恢复所有缓存规则吗?')) {
                     const caches = ['cache_cn', 'cache_nocn', 'lazy_cache'];
                     Promise.all(caches.map(plugin => 
-                        fetch(`/cgi-bin/luci/mosdns_panel/api/restore_dump/${plugin}`)
-                            .then(res => res.json())
+                        fetchAPI(`/cgi-bin/luci/admin/mosdns_panel/api/restore_dump/${plugin}`)
                             .then(data => {
                                 if(data.success) return `✅ ${cacheTitles[plugin] || plugin}: ${data.message}`;
                                 return `❌ ${cacheTitles[plugin] || plugin}: ${data.error}`;
@@ -535,8 +566,7 @@
             multiAction('flush-rules-btn', ['cache_cn/flush', 'cache_nocn/flush', 'lazy_cache/flush'], '确定清空所有缓存规则吗?');
             getById('restart-mosdns-btn').onclick = () => { 
                 if (confirm('确定重启 MosDNS 服务吗?')) {
-                    fetch('/cgi-bin/luci/mosdns_panel/api/restart')
-                        .then(res => res.json())
+                    fetchAPI('/cgi-bin/luci/admin/mosdns_panel/api/restart')
                         .then(data => {
                             if(data.success) {
                                 alert('✅ 重启指令已发送，请稍后刷新页面查看状态。');
@@ -549,7 +579,7 @@
                 }
             };
             const showEndpoints = { '总缓存': 'cache_all', 'CN 缓存': 'cache_cn', '!CN 缓存': 'cache_nocn', '乐观缓存': 'lazy_cache' };
-            const dvContainer = getById('data-view-buttons'); dvContainer.innerHTML = ''; Object.entries(showEndpoints).forEach(([name, path]) => { const btn = createElement('button', 'data-view-group-btn'); btn.textContent = name; btn.onclick = () => window.open(`/cgi-bin/luci/mosdns_panel/plugins/${path}/dump`, '_blank'); dvContainer.appendChild(btn); });
+            const dvContainer = getById('data-view-buttons'); dvContainer.innerHTML = ''; Object.entries(showEndpoints).forEach(([name, path]) => { const btn = createElement('button', 'data-view-group-btn'); btn.textContent = name; btn.onclick = () => window.open(`/cgi-bin/luci/admin/mosdns_panel/plugins/${path}/dump`, '_blank'); dvContainer.appendChild(btn); });
             getById('show-log-btn').onclick = openLogViewer;
             const tabButtons = D.querySelectorAll('.tab-button'); const tabContents = D.querySelectorAll('.tab-content');
             tabButtons.forEach(button => { button.addEventListener('click', () => { tabButtons.forEach(btn => btn.classList.remove('active')); button.classList.add('active'); tabContents.forEach(content => content.classList.toggle('active', content.id === `tab-${button.dataset.tab}`)); }); });
@@ -585,8 +615,7 @@
              if (!silent) getById('log-container').innerHTML = '<div style="padding:2rem;text-align:center;color:var(--label-color);"><i class="fas fa-circle-notch fa-spin fa-2x"></i><p style="margin-top:1rem;">Loading logs...</p></div>';
              
              // Request 5000 lines (backend max 10000)
-             fetch('/cgi-bin/luci/mosdns_panel/api/get_log?limit=5000')
-                .then(res => res.json())
+             fetchAPI('/cgi-bin/luci/admin/mosdns_panel/api/get_log?limit=5000')
                 .then(data => {
                     if (data.success) {
                         // Optimization: Skip if content hasn't changed
@@ -880,8 +909,7 @@
             
             window.clearLogs = () => { 
                 if(!confirm('确定要清空服务器日志文件吗？此操作将永久删除日志内容。')) return;
-                fetch('/cgi-bin/luci/mosdns_panel/api/clear_log')
-                    .then(res => res.json())
+                fetchAPI('/cgi-bin/luci/admin/mosdns_panel/api/clear_log')
                     .then(data => {
                         if (data.success) {
                             logDataCache = [];
